@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
+import ePub from 'epubjs';
 import { 
   BookOpen, 
   Sun, 
@@ -12,7 +13,8 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
-  Loader2
+  Loader2,
+  Upload
 } from 'lucide-react';
 
 interface Book {
@@ -57,6 +59,7 @@ export default function App() {
   const [newContent, setNewContent] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isParsingEpub, setIsParsingEpub] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('app_books', JSON.stringify(books));
@@ -66,6 +69,62 @@ export default function App() {
     setApiKey(key);
     localStorage.setItem('gemini_api_key', key);
     setShowApiKeyModal(false);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.name.endsWith('.epub')) {
+      setIsParsingEpub(true);
+      try {
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const book = ePub(event.target?.result as ArrayBuffer);
+          await book.ready;
+          const metadata = await book.loaded.metadata;
+          
+          let fullText = '';
+          const spine = book.spine as any;
+          for (const item of spine.spineItems) {
+            const doc = await item.load(book.load.bind(book));
+            const text = doc.textContent || doc.innerText || '';
+            fullText += text.trim() + '\n\n';
+          }
+
+          const newBook: Book = {
+            id: Date.now().toString(),
+            title: metadata.title || file.name.replace('.epub', ''),
+            author: metadata.creator || 'ناشناس',
+            content: fullText.trim() || 'متنی از فایل استخراج نشد.',
+            currentPage: 1,
+          };
+
+          setBooks(prev => [...prev, newBook]);
+          setIsParsingEpub(false);
+          setShowAddModal(false);
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (error) {
+        alert('خطا در خواندن فایل EPUB');
+        setIsParsingEpub(false);
+      }
+    } else if (file.name.endsWith('.txt')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        const newBook: Book = {
+          id: Date.now().toString(),
+          title: file.name.replace('.txt', ''),
+          author: 'ناشناس',
+          content: text,
+          currentPage: 1,
+        };
+        setBooks(prev => [...prev, newBook]);
+        setShowAddModal(false);
+      };
+      reader.readAsText(file);
+    }
   };
 
   const handleAddBook = () => {
@@ -291,7 +350,34 @@ export default function App() {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-[#141414] text-white p-6 rounded-2xl border border-white/10 w-full max-w-md">
             <h3 className="text-lg font-bold mb-4">افزودن کتاب جدید</h3>
-            <div className="space-y-3">
+            
+            <div className="mb-4 p-4 border-2 border-dashed border-white/20 rounded-xl text-center hover:border-amber-500/50 transition relative">
+              <input 
+                type="file" 
+                accept=".epub,.txt"
+                onChange={handleFileUpload}
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+              {isParsingEpub ? (
+                <div className="flex items-center justify-center gap-2 text-sm text-amber-500 py-2">
+                  <Loader2 className="w-5 h-5 animate-spin" /> در حال پردازش فایل EPUB...
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-1 text-xs opacity-70 py-2">
+                  <Upload className="w-6 h-6 text-amber-500 mb-1" />
+                  <span className="font-bold text-sm">انتخاب فایل EPUB یا TXT</span>
+                  <span>یا فایل را اینجا رها کنید</span>
+                </div>
+              )}
+            </div>
+
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-white/10"></div>
+              <span className="flex-shrink mx-4 text-xs opacity-40">یا ورود دستی</span>
+              <div className="flex-grow border-t border-white/10"></div>
+            </div>
+
+            <div className="space-y-3 mt-2">
               <input 
                 type="text"
                 placeholder="عنوان کتاب"
@@ -308,7 +394,7 @@ export default function App() {
               />
               <textarea 
                 placeholder="متن کتاب..."
-                rows={5}
+                rows={4}
                 value={newContent}
                 onChange={(e) => setNewContent(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:border-amber-500"
